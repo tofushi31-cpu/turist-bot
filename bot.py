@@ -776,7 +776,7 @@ async def handle_menu_notifications(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer()
         return
-    await send_bookings_list(callback.message)
+    await send_notifications(callback.message)
     await callback.answer()
 
 
@@ -1260,6 +1260,23 @@ async def send_bookings_list(target: Message):
             f"   пожелания: {format_booking_wishes(b)}"
         )
     await target.answer("\n\n".join(lines))
+
+
+async def send_notifications(target: Message):
+    bookings = db.list_all_bookings()
+    if not bookings:
+        await target.answer("Активных заявок нет.")
+        return
+
+    for b in bookings:
+        text = (
+            f"#{b['id']} — {b['tour_title']}\n"
+            f"Дата: {b['tour_date'] or 'не указана'}\n"
+            f"Статус: {STATUS_LABELS[b['status']]}\n"
+            f"Клиент: {b['username'] or b['user_id']}\n"
+            f"Пожелания: {format_booking_wishes(b)}"
+        )
+        await target.answer(text, reply_markup=build_status_menu(b["id"]))
 
 
 @dp.message(F.text == "/bookings")
