@@ -208,6 +208,8 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="🖼 Контент", callback_data="menu_content")])
         rows.append([InlineKeyboardButton(text="📤 Фото для постов", callback_data="menu_photo")])
         rows.append([InlineKeyboardButton(text="📋 Заявки", callback_data="menu_bookings")])
+        active_count = len(db.list_all_bookings())
+        rows.append([InlineKeyboardButton(text=f"🔔 Уведомления ({active_count})", callback_data="menu_notifications")])
         rows.append([InlineKeyboardButton(text="📅 Расписание", callback_data="menu_calendar")])
         rows.append([InlineKeyboardButton(text="📊 Топ пожеланий", callback_data="menu_wishes_stats")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -762,6 +764,15 @@ async def handle_menu_content(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "menu_bookings")
 async def handle_menu_bookings(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await send_bookings_list(callback.message)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_notifications")
+async def handle_menu_notifications(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer()
         return
