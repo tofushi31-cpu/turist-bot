@@ -245,3 +245,25 @@ async def test_draft_flow_uses_prefixed_keys_and_does_not_collide_with_booking_t
     data = await state.get_data()
     assert data["draft_variant"] == 1
     assert data["tour_id"] == "some_booking_in_progress"
+
+
+# --- Инфо-пост про аренду мопеда/мотоцикла ---
+
+def test_build_rental_post_caption_includes_price_and_safety_notes():
+    caption = bot_module.build_rental_post_caption("150-300 THB/день")
+    assert "150-300 THB/день" in caption
+    assert bot_module.RENTAL_SAFETY_NOTES in caption
+
+
+async def test_rental_price_text_is_saved_and_state_cleared(monkeypatch):
+    set_setting_mock = MagicMock()
+    monkeypatch.setattr(bot_module.db, "set_setting", set_setting_mock)
+    state = FakeState()
+    state.state = bot_module.AdminContentStates.waiting_rental_price
+    message = make_message("150-300 THB/день")
+
+    await bot_module.handle_rental_price_text(message, state)
+
+    set_setting_mock.assert_called_once_with("rental_price_text", "150-300 THB/день")
+    assert state.state is None
+    message.answer.assert_awaited_once_with("Сохранено: 150-300 THB/день ✅", reply_markup=bot_module.rental_menu)

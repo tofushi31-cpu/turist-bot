@@ -52,3 +52,19 @@ def test_init_db_migrates_custom_wish_column_on_old_schema(tmp_path, monkeypatch
         tour_date="10.10.2026", comment="без комментария", custom_wish="Особое пожелание",
     )
     assert db.get_booking(booking_id)["custom_wish"] == "Особое пожелание"
+
+
+def test_get_setting_returns_default_when_missing(isolated_db):
+    assert db.get_setting("rental_price_text", default="нет данных") == "нет данных"
+    assert db.get_setting("rental_price_text") is None
+
+
+def test_set_setting_then_get_setting_round_trip(isolated_db):
+    db.set_setting("rental_price_text", "150-300 THB/день")
+    assert db.get_setting("rental_price_text") == "150-300 THB/день"
+
+
+def test_set_setting_overwrites_existing_value(isolated_db):
+    db.set_setting("rental_price_text", "150-300 THB/день")
+    db.set_setting("rental_price_text", "200-350 THB/день")
+    assert db.get_setting("rental_price_text") == "200-350 THB/день"

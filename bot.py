@@ -127,6 +127,10 @@ class PhotoStates(StatesGroup):
     waiting_photo = State()
 
 
+class AdminContentStates(StatesGroup):
+    waiting_rental_price = State()
+
+
 PHOTO_FORMATS = {
     "square": (1080, 1080),
     "story": (1080, 1920),
@@ -218,6 +222,7 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text=f"🔔 Уведомления ({active_count})", callback_data="menu_notifications")])
         rows.append([InlineKeyboardButton(text="📅 Расписание", callback_data="menu_calendar")])
         rows.append([InlineKeyboardButton(text="📊 Топ пожеланий", callback_data="menu_wishes_stats")])
+        rows.append([InlineKeyboardButton(text="🛵 Аренда мопеда", callback_data="menu_rental")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 tours = {
@@ -520,6 +525,24 @@ def build_confirmation_email_body(booking: dict) -> str:
     )
 
 
+RENTAL_SAFETY_NOTES = (
+    "🪖 Шлем обязателен по закону — штрафуют и без него не будет страховой защиты\n"
+    "🪪 Для легальной езды нужны местные права категории A или международное водительское удостоверение\n"
+    "🔧 Проверьте тормоза, шины и уровень топлива до поездки, не полагайтесь на слова арендодателя\n"
+    "📸 Сфотографируйте все царапины и повреждения перед тем, как забрать мопед — так проще при возврате\n"
+    "🛂 Не оставляйте в залог оригинал паспорта — только копию или депозит, оригинал документа держат при себе"
+)
+
+
+def build_rental_post_caption(price_text: str) -> str:
+    return (
+        "🛵 Аренда мопеда/мотоцикла в Таиланде\n\n"
+        f"Ориентир по цене: {price_text}\n\n"
+        f"{RENTAL_SAFETY_NOTES}\n\n"
+        "⚠️ Цены ориентировочные и зависят от локации, сезона и модели — уточняйте на месте перед арендой."
+    )
+
+
 tours_menu = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text=tour["title"], callback_data=tour_id)]
@@ -770,6 +793,43 @@ def build_visa_card(country_id: str, country_label: str, opt_label: str, highlig
     return out_path
 
 
+INFO_CARD_COLORS = ((28, 70, 74), (42, 140, 128))
+
+
+def build_info_card(title: str, highlight: str, caption: str, out_path: Path) -> Path:
+    w, h = CARD_SIZE
+    top_c, bottom_c = INFO_CARD_COLORS
+    card = diagonal_gradient((w, h), top_c, bottom_c)
+    draw = ImageDraw.Draw(card)
+
+    padding = 64
+    title_font = ImageFont.truetype(str(FONT_BOLD), 72)
+    highlight_font = ImageFont.truetype(str(FONT_BOLD), 38)
+    label_font = ImageFont.truetype(str(FONT_REGULAR), 30)
+
+    title_lines = wrap_text(draw, strip_emoji(title), title_font, w - padding * 2)
+    title_line_height = 84
+    y = (h - title_line_height * len(title_lines)) / 2 - 40
+    for line in title_lines:
+        draw.text((padding, y), line, font=title_font, fill=CARD_INK)
+        y += title_line_height
+
+    badge_pad_x, badge_pad_y = 28, 18
+    highlight_w = draw.textlength(highlight, font=highlight_font)
+    badge_h = 40 + badge_pad_y * 2
+    badge_y = h - padding - badge_h
+    draw.rounded_rectangle(
+        [padding, badge_y, padding + highlight_w + badge_pad_x * 2, badge_y + badge_h],
+        radius=badge_h / 2,
+        fill=(255, 255, 255),
+    )
+    draw.text((padding + badge_pad_x, badge_y + badge_pad_y), highlight, font=highlight_font, fill=top_c)
+    draw.text((padding, badge_y - 50), caption, font=label_font, fill=CARD_MUTED)
+
+    card.save(out_path, "JPEG", quality=92)
+    return out_path
+
+
 @dp.message(CommandStart())
 async def handle_start(message: Message):
     await message.answer("Привет! Я твой первый бот 🎉", reply_markup=home_keyboard)
@@ -911,6 +971,68 @@ async def handle_photo_upload(message: Message, state: FSMContext):
 @dp.message(PhotoStates.waiting_photo)
 async def handle_photo_upload_wrong_type(message: Message):
     await message.answer("Пришли именно фото (не файл и не текст).")
+
+
+rental_menu = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Сделать пост", callback_data="rental_post")],
+        [InlineKeyboardButton(text="✏️ Изменить цену", callback_data="rental_edit")],
+    ]
+)
+
+
+@dp.callback_query(F.data == "menu_rental")
+async def handle_menu_rental(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    price_text = db.get_setting("rental_price_text")
+    if not price_text:
+        await state.set_state(AdminContentStates.waiting_rental_price)
+        await callback.message.answer("Цена ещё не задана. Введи текущий ориентир (например: 150-300 THB/день):")
+        await callback.answer()
+        return
+    await callback.message.answer(f"Текущая цена: {price_text}", reply_markup=rental_menu)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "rental_edit")
+async def handle_rental_edit(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await state.set_state(AdminContentStates.waiting_rental_price)
+    await callback.message.answer("Введи новый ориентир цены (например: 150-300 THB/день):")
+    await callback.answer()
+
+
+@dp.message(AdminContentStates.waiting_rental_price)
+async def handle_rental_price_text(message: Message, state: FSMContext):
+    db.set_setting("rental_price_text", message.text)
+    await state.clear()
+    await message.answer(f"Сохранено: {message.text} ✅", reply_markup=rental_menu)
+
+
+@dp.callback_query(F.data == "rental_post")
+async def handle_rental_post(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    price_text = db.get_setting("rental_price_text")
+    if not price_text:
+        await callback.message.answer("Цена ещё не задана — сначала задай её через «✏️ Изменить цену».")
+        await callback.answer()
+        return
+
+    card_path = TMP_DIR / f"rental_{callback.from_user.id}.jpg"
+    try:
+        build_info_card("🛵 Аренда мопеда/мотоцикла", price_text, "Ориентир по цене", card_path)
+        await callback.message.answer_photo(
+            FSInputFile(card_path), caption=build_rental_post_caption(price_text)
+        )
+    finally:
+        card_path.unlink(missing_ok=True)
+    await callback.answer()
 
 
 @dp.callback_query(F.data == "tours")
