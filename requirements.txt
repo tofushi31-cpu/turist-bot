@@ -1,0 +1,5 @@
+aiogram==3.29.1
+python-dotenv==1.2.2
+pillow==12.3.0
+gspread==6.2.1
+yookassa==3.11.0
