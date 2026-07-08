@@ -209,19 +209,29 @@ def build_calendar_keyboard(year: int, month: int) -> InlineKeyboardMarkup:
 
 def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="🗺 Туры", callback_data="tours")],
-        [InlineKeyboardButton(text="📅 Мои брони", callback_data="menu_mybookings")],
-        [InlineKeyboardButton(text="📄 Документы для визы", callback_data="visa_docs")],
-        [InlineKeyboardButton(text="📞 Контакты", callback_data="contacts")],
+        [
+            InlineKeyboardButton(text="🗺 Туры", callback_data="tours"),
+            InlineKeyboardButton(text="📅 Мои брони", callback_data="menu_mybookings"),
+        ],
+        [
+            InlineKeyboardButton(text="📄 Документы для визы", callback_data="visa_docs"),
+            InlineKeyboardButton(text="📞 Контакты", callback_data="contacts"),
+        ],
     ]
     if is_admin(user_id):
-        rows.append([InlineKeyboardButton(text="🖼 Контент", callback_data="menu_content")])
-        rows.append([InlineKeyboardButton(text="📤 Фото для постов", callback_data="menu_photo")])
-        rows.append([InlineKeyboardButton(text="📋 Заявки", callback_data="menu_bookings")])
         active_count = len(db.list_pending_bookings())
-        rows.append([InlineKeyboardButton(text=f"🔔 Уведомления ({active_count})", callback_data="menu_notifications")])
-        rows.append([InlineKeyboardButton(text="📅 Расписание", callback_data="menu_calendar")])
-        rows.append([InlineKeyboardButton(text="📊 Топ пожеланий", callback_data="menu_wishes_stats")])
+        rows.append([
+            InlineKeyboardButton(text="📋 Заявки", callback_data="menu_bookings"),
+            InlineKeyboardButton(text=f"🔔 Уведомления ({active_count})", callback_data="menu_notifications"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="📅 Расписание", callback_data="menu_calendar"),
+            InlineKeyboardButton(text="📊 Топ пожеланий", callback_data="menu_wishes_stats"),
+        ])
+        rows.append([
+            InlineKeyboardButton(text="🖼 Контент", callback_data="menu_content"),
+            InlineKeyboardButton(text="📤 Фото для постов", callback_data="menu_photo"),
+        ])
         rows.append([InlineKeyboardButton(text="🛵 Аренда мопеда", callback_data="menu_rental")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
