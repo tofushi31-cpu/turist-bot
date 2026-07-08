@@ -129,6 +129,7 @@ class PhotoStates(StatesGroup):
 
 class AdminContentStates(StatesGroup):
     waiting_rental_price = State()
+    waiting_content_photo = State()
 
 
 PHOTO_FORMATS = {
@@ -271,6 +272,11 @@ tours = {
         ],
     },
 }
+
+
+def get_tour_photos(tour_id: str) -> list[str]:
+    return tours[tour_id]["photos"] + db.list_tour_photos(tour_id)
+
 
 VISA_DISCLAIMER = "\n\n⚠️ Правила могут измениться — уточняйте перед поездкой на официальном сайте посольства."
 
@@ -563,6 +569,20 @@ tours_menu = InlineKeyboardMarkup(
 content_tours_menu = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text=tour["title"], callback_data=f"draft_{tour_id}")]
+        for tour_id, tour in tours.items()
+    ]
+)
+
+content_menu = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Пост для Instagram", callback_data="content_draft")],
+        [InlineKeyboardButton(text="📤 Загрузить фото тура", callback_data="content_upload")],
+    ]
+)
+
+upload_tours_menu = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text=tour["title"], callback_data=f"uploadphoto_{tour_id}")]
         for tour_id, tour in tours.items()
     ]
 )
@@ -877,8 +897,60 @@ async def handle_menu_content(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer()
         return
+    await callback.message.answer("Что нужно?", reply_markup=content_menu)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "content_draft")
+async def handle_content_draft(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
     await callback.message.answer("Выбери тур, для которого нужен пост:", reply_markup=content_tours_menu)
     await callback.answer()
+
+
+@dp.callback_query(F.data == "content_upload")
+async def handle_content_upload(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.message.answer("Для какого тура фото?", reply_markup=upload_tours_menu)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("uploadphoto_"))
+async def handle_upload_photo_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    tour_id = callback.data.removeprefix("uploadphoto_")
+    await state.update_data(upload_tour_id=tour_id)
+    await state.set_state(AdminContentStates.waiting_content_photo)
+    await callback.message.answer(f"Пришли фото для «{tours[tour_id]['title']}» — попадёт в галерею тура.")
+    await callback.answer()
+
+
+@dp.message(AdminContentStates.waiting_content_photo, F.photo)
+async def handle_tour_photo_upload(message: Message, state: FSMContext):
+    data = await state.get_data()
+    tour_id = data["upload_tour_id"]
+
+    photo = message.photo[-1]
+    tg_file = await bot.get_file(photo.file_id)
+    filename = f"{tour_id}_upload_{photo.file_id}.jpg"
+    await bot.download_file(tg_file.file_path, destination=IMAGES_DIR / filename)
+
+    db.add_tour_photo(tour_id, filename)
+    await state.clear()
+
+    total = len(get_tour_photos(tour_id))
+    await message.answer(f"Фото добавлено в галерею «{tours[tour_id]['title']}» ✅ (сейчас в галерее: {total})")
+
+
+@dp.message(AdminContentStates.waiting_content_photo)
+async def handle_tour_photo_upload_wrong_type(message: Message):
+    await message.answer("Пришли именно фото (не файл и не текст).")
 
 
 @dp.callback_query(F.data == "menu_bookings")
@@ -1517,7 +1589,7 @@ async def handle_content(message: Message):
     if not is_admin(message.from_user.id):
         await message.answer(f"Команда только для админа. Твой ID: {message.from_user.id}")
         return
-    await message.answer("Выбери тур, для которого нужен пост:", reply_markup=content_tours_menu)
+    await message.answer("Что нужно?", reply_markup=content_menu)
 
 
 @dp.callback_query(F.data.startswith("draft_") & ~F.data.in_({"draft_regen", "draft_approve"}))

@@ -58,6 +58,30 @@ def init_db():
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tour_photos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tour_id TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+
+
+def add_tour_photo(tour_id: str, filename: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("INSERT INTO tour_photos (tour_id, filename) VALUES (?, ?)", (tour_id, filename))
+
+
+def list_tour_photos(tour_id: str) -> list[str]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT filename FROM tour_photos WHERE tour_id = ? ORDER BY id", (tour_id,)
+        ).fetchall()
+        return [row[0] for row in rows]
+
 
 def get_setting(key: str, default: str | None = None) -> str | None:
     with sqlite3.connect(DB_PATH) as conn:

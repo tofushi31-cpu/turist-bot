@@ -267,3 +267,43 @@ async def test_rental_price_text_is_saved_and_state_cleared(monkeypatch):
     set_setting_mock.assert_called_once_with("rental_price_text", "150-300 THB/день")
     assert state.state is None
     message.answer.assert_awaited_once_with("Сохранено: 150-300 THB/день ✅", reply_markup=bot_module.rental_menu)
+
+
+# --- Загрузка фото в галерею тура ---
+
+def test_get_tour_photos_combines_hardcoded_and_uploaded(monkeypatch):
+    monkeypatch.setattr(bot_module.db, "list_tour_photos", MagicMock(return_value=["tour_1_upload_abc.jpg"]))
+    photos = bot_module.get_tour_photos("tour_1")
+    assert photos == bot_module.tours["tour_1"]["photos"] + ["tour_1_upload_abc.jpg"]
+
+
+def test_get_tour_photos_empty_uploads(monkeypatch):
+    monkeypatch.setattr(bot_module.db, "list_tour_photos", MagicMock(return_value=[]))
+    photos = bot_module.get_tour_photos("tour_1")
+    assert photos == bot_module.tours["tour_1"]["photos"]
+
+
+async def test_tour_photo_upload_saves_file_and_confirms_with_count(monkeypatch):
+    add_tour_photo_mock = MagicMock()
+    monkeypatch.setattr(bot_module.db, "add_tour_photo", add_tour_photo_mock)
+    monkeypatch.setattr(bot_module.db, "list_tour_photos", MagicMock(return_value=["tour_1_upload_abc.jpg"]))
+
+    fake_file = MagicMock(file_path="photos/file_123.jpg")
+    monkeypatch.setattr(bot_module.bot, "get_file", AsyncMock(return_value=fake_file))
+    download_mock = AsyncMock()
+    monkeypatch.setattr(bot_module.bot, "download_file", download_mock)
+
+    state = FakeState({"upload_tour_id": "tour_1"})
+    message = make_message()
+    message.photo = [MagicMock(file_id="abc")]
+
+    await bot_module.handle_tour_photo_upload(message, state)
+
+    add_tour_photo_mock.assert_called_once_with("tour_1", "tour_1_upload_abc.jpg")
+    download_mock.assert_awaited_once_with(
+        "photos/file_123.jpg", destination=bot_module.IMAGES_DIR / "tour_1_upload_abc.jpg"
+    )
+    assert (await state.get_data()) == {}
+    message.answer.assert_awaited_once_with(
+        "Фото добавлено в галерею «🌊 Морская прогулка» ✅ (сейчас в галерее: 4)"
+    )

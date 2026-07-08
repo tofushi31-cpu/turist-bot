@@ -68,3 +68,21 @@ def test_set_setting_overwrites_existing_value(isolated_db):
     db.set_setting("rental_price_text", "150-300 THB/день")
     db.set_setting("rental_price_text", "200-350 THB/день")
     assert db.get_setting("rental_price_text") == "200-350 THB/день"
+
+
+def test_list_tour_photos_empty_for_tour_without_uploads(isolated_db):
+    assert db.list_tour_photos("tour_1") == []
+
+
+def test_add_tour_photo_then_list_tour_photos_round_trip(isolated_db):
+    db.add_tour_photo("tour_1", "tour_1_upload_abc.jpg")
+    assert db.list_tour_photos("tour_1") == ["tour_1_upload_abc.jpg"]
+
+
+def test_list_tour_photos_preserves_insertion_order_and_is_scoped_to_tour(isolated_db):
+    db.add_tour_photo("tour_1", "tour_1_upload_first.jpg")
+    db.add_tour_photo("tour_2", "tour_2_upload_other.jpg")
+    db.add_tour_photo("tour_1", "tour_1_upload_second.jpg")
+
+    assert db.list_tour_photos("tour_1") == ["tour_1_upload_first.jpg", "tour_1_upload_second.jpg"]
+    assert db.list_tour_photos("tour_2") == ["tour_2_upload_other.jpg"]
