@@ -214,7 +214,7 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="🖼 Контент", callback_data="menu_content")])
         rows.append([InlineKeyboardButton(text="📤 Фото для постов", callback_data="menu_photo")])
         rows.append([InlineKeyboardButton(text="📋 Заявки", callback_data="menu_bookings")])
-        active_count = len(db.list_all_bookings())
+        active_count = len(db.list_pending_bookings())
         rows.append([InlineKeyboardButton(text=f"🔔 Уведомления ({active_count})", callback_data="menu_notifications")])
         rows.append([InlineKeyboardButton(text="📅 Расписание", callback_data="menu_calendar")])
         rows.append([InlineKeyboardButton(text="📊 Топ пожеланий", callback_data="menu_wishes_stats")])
@@ -1356,7 +1356,7 @@ async def send_bookings_list(target: Message):
 
 
 async def send_notifications(target: Message):
-    bookings = db.list_all_bookings()
+    bookings = db.list_pending_bookings()
     if not bookings:
         await target.answer("Активных заявок нет.")
         return

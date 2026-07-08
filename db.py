@@ -133,6 +133,15 @@ def list_all_bookings() -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def list_pending_bookings() -> list[dict]:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM bookings WHERE status IN ('new', 'confirmed') ORDER BY id DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_client_bookings(user_id: int) -> list[dict]:
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
