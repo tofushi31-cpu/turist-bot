@@ -510,13 +510,18 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
-def build_status_menu(booking_id: int) -> InlineKeyboardMarkup:
+def build_status_menu(booking_id: int, status: str = "new") -> InlineKeyboardMarkup | None:
+    if status in ("paid", "cancelled"):
+        return None
+
+    row = []
+    if status == "new":
+        row.append(InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"status_confirmed_{booking_id}"))
+    row.append(InlineKeyboardButton(text="💰 Оплачена", callback_data=f"status_paid_{booking_id}"))
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"status_confirmed_{booking_id}"),
-                InlineKeyboardButton(text="💰 Оплачена", callback_data=f"status_paid_{booking_id}"),
-            ],
+            row,
             [InlineKeyboardButton(text="❌ Отменить", callback_data=f"status_cancelled_{booking_id}")],
         ]
     )
@@ -1153,7 +1158,7 @@ async def handle_status_change(callback: CallbackQuery):
 
     await callback.message.edit_text(
         f"{callback.message.text}\n\nСтатус: {STATUS_LABELS[status]}",
-        reply_markup=build_status_menu(booking_id),
+        reply_markup=build_status_menu(booking_id, status),
     )
     await callback.answer(f"Статус обновлён: {STATUS_LABELS[status]}")
 
@@ -1276,7 +1281,7 @@ async def send_notifications(target: Message):
             f"Клиент: {b['username'] or b['user_id']}\n"
             f"Пожелания: {format_booking_wishes(b)}"
         )
-        await target.answer(text, reply_markup=build_status_menu(b["id"]))
+        await target.answer(text, reply_markup=build_status_menu(b["id"], b["status"]))
 
 
 @dp.message(F.text == "/bookings")
