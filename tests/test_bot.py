@@ -269,6 +269,30 @@ async def test_rental_price_text_is_saved_and_state_cleared(monkeypatch):
     message.answer.assert_awaited_once_with("Сохранено: 150-300 THB/день ✅", reply_markup=bot_module.rental_menu)
 
 
+# --- Инфо-пост про недвижимость ---
+
+def test_build_realestate_post_caption_includes_price_and_notes():
+    caption = bot_module.build_realestate_post_caption("аренда 15-40к THB/мес")
+    assert "аренда 15-40к THB/мес" in caption
+    assert bot_module.REAL_ESTATE_NOTES in caption
+
+
+async def test_realestate_price_text_is_saved_and_state_cleared(monkeypatch):
+    set_setting_mock = MagicMock()
+    monkeypatch.setattr(bot_module.db, "set_setting", set_setting_mock)
+    state = FakeState()
+    state.state = bot_module.AdminContentStates.waiting_realestate_price
+    message = make_message("аренда 15-40к THB/мес")
+
+    await bot_module.handle_realestate_price_text(message, state)
+
+    set_setting_mock.assert_called_once_with("realestate_price_text", "аренда 15-40к THB/мес")
+    assert state.state is None
+    message.answer.assert_awaited_once_with(
+        "Сохранено: аренда 15-40к THB/мес ✅", reply_markup=bot_module.realestate_menu
+    )
+
+
 # --- Загрузка фото в галерею тура ---
 
 def test_get_tour_photos_combines_hardcoded_and_uploaded(monkeypatch):

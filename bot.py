@@ -130,6 +130,7 @@ class PhotoStates(StatesGroup):
 class AdminContentStates(StatesGroup):
     waiting_rental_price = State()
     waiting_content_photo = State()
+    waiting_realestate_price = State()
 
 
 PHOTO_FORMATS = {
@@ -233,7 +234,10 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🖼 Контент", callback_data="menu_content"),
             InlineKeyboardButton(text="📤 Фото для постов", callback_data="menu_photo"),
         ])
-        rows.append([InlineKeyboardButton(text="🛵 Аренда мопеда", callback_data="menu_rental")])
+        rows.append([
+            InlineKeyboardButton(text="🛵 Аренда мопеда", callback_data="menu_rental"),
+            InlineKeyboardButton(text="🏠 Недвижимость", callback_data="menu_realestate"),
+        ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 tours = {
@@ -556,6 +560,27 @@ def build_rental_post_caption(price_text: str) -> str:
         f"Ориентир по цене: {price_text}\n\n"
         f"{RENTAL_SAFETY_NOTES}\n\n"
         "⚠️ Цены ориентировочные и зависят от локации, сезона и модели — уточняйте на месте перед арендой."
+    )
+
+
+REAL_ESTATE_NOTES = (
+    "🏢 Иностранцы не могут напрямую владеть землёй в Таиланде, но могут владеть квартирой в кондоминиуме — "
+    "в рамках квоты 49% иностранных владельцев на здание\n"
+    "📜 Для дома/земли обычная схема — долгосрочная аренда (обычно до 30 лет, уточняйте условия продления в договоре)\n"
+    "📋 Проверяйте тип документа на землю — Чанот (Nor Sor 4) даёт максимум прав, другие типы ограничены\n"
+    "💰 При аренде жилья стандартный депозит — 1-2 месяца + аванс за месяц, всё фиксируйте в письменном договоре\n"
+    "⚖️ Перед подписанием любых документов проверяйте их у лицензированного юриста, а квоту на владение "
+    "конкретным кондо — у управляющей компании здания"
+)
+
+
+def build_realestate_post_caption(price_text: str) -> str:
+    return (
+        "🏠 Недвижимость в Таиланде: аренда и покупка\n\n"
+        f"Ориентир по цене: {price_text}\n\n"
+        f"{REAL_ESTATE_NOTES}\n\n"
+        "⚠️ Это общие ориентиры, не юридическая консультация — законы и квоты меняются, "
+        "перед сделкой уточняйте актуальные условия у юриста."
     )
 
 
@@ -1111,6 +1136,70 @@ async def handle_rental_post(callback: CallbackQuery):
         build_info_card("🛵 Аренда мопеда/мотоцикла", price_text, "Ориентир по цене", card_path)
         await callback.message.answer_photo(
             FSInputFile(card_path), caption=build_rental_post_caption(price_text)
+        )
+    finally:
+        card_path.unlink(missing_ok=True)
+    await callback.answer()
+
+
+realestate_menu = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Сделать пост", callback_data="realestate_post")],
+        [InlineKeyboardButton(text="✏️ Изменить цену", callback_data="realestate_edit")],
+    ]
+)
+
+
+@dp.callback_query(F.data == "menu_realestate")
+async def handle_menu_realestate(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    price_text = db.get_setting("realestate_price_text")
+    if not price_text:
+        await state.set_state(AdminContentStates.waiting_realestate_price)
+        await callback.message.answer(
+            "Цена ещё не задана. Введи текущий ориентир (например: аренда 15-40к THB/мес, кондо от 2.5 млн THB):"
+        )
+        await callback.answer()
+        return
+    await callback.message.answer(f"Текущая цена: {price_text}", reply_markup=realestate_menu)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "realestate_edit")
+async def handle_realestate_edit(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await state.set_state(AdminContentStates.waiting_realestate_price)
+    await callback.message.answer("Введи новый ориентир цены (например: аренда 15-40к THB/мес, кондо от 2.5 млн THB):")
+    await callback.answer()
+
+
+@dp.message(AdminContentStates.waiting_realestate_price)
+async def handle_realestate_price_text(message: Message, state: FSMContext):
+    db.set_setting("realestate_price_text", message.text)
+    await state.clear()
+    await message.answer(f"Сохранено: {message.text} ✅", reply_markup=realestate_menu)
+
+
+@dp.callback_query(F.data == "realestate_post")
+async def handle_realestate_post(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    price_text = db.get_setting("realestate_price_text")
+    if not price_text:
+        await callback.message.answer("Цена ещё не задана — сначала задай её через «✏️ Изменить цену».")
+        await callback.answer()
+        return
+
+    card_path = TMP_DIR / f"realestate_{callback.from_user.id}.jpg"
+    try:
+        build_info_card("🏠 Недвижимость в Таиланде", price_text, "Ориентир по цене", card_path)
+        await callback.message.answer_photo(
+            FSInputFile(card_path), caption=build_realestate_post_caption(price_text)
         )
     finally:
         card_path.unlink(missing_ok=True)
