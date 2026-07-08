@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 import db
+import mailer
 import payments
 import sheets
 
@@ -28,3 +29,5 @@ def _stub_external_integrations(monkeypatch):
     monkeypatch.setattr(sheets, "_get_worksheet", lambda: None)
     monkeypatch.setattr(payments, "YOOKASSA_SHOP_ID", None)
     monkeypatch.setattr(payments, "YOOKASSA_SECRET_KEY", None)
+    monkeypatch.setattr(mailer, "SMTP_USER", None)
+    monkeypatch.setattr(mailer, "SMTP_PASSWORD", None)

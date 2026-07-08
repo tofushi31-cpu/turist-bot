@@ -27,7 +27,8 @@ def init_db():
                 segment TEXT,
                 source TEXT,
                 alt_contact TEXT,
-                custom_wish TEXT
+                custom_wish TEXT,
+                client_email TEXT
             )
             """
         )
@@ -42,6 +43,7 @@ def init_db():
             "source": "TEXT",
             "alt_contact": "TEXT",
             "custom_wish": "TEXT",
+            "client_email": "TEXT",
         }
         for column, decl in migrations.items():
             if column not in columns:
@@ -61,16 +63,17 @@ def add_booking(
     source: str | None = None,
     alt_contact: str | None = None,
     custom_wish: str | None = None,
+    client_email: str | None = None,
 ) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
             "INSERT INTO bookings "
             "(user_id, username, tour_id, tour_title, tour_date, comment, "
-            " people_count, wishes, segment, source, alt_contact, custom_wish) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " people_count, wishes, segment, source, alt_contact, custom_wish, client_email) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 user_id, username, tour_id, tour_title, tour_date, comment,
-                people_count, wishes, segment, source, alt_contact, custom_wish,
+                people_count, wishes, segment, source, alt_contact, custom_wish, client_email,
             ),
         )
         return cursor.lastrowid

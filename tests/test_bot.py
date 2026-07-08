@@ -42,6 +42,7 @@ def make_callback(data, user_id=1):
     callback.message = MagicMock()
     callback.message.answer = AsyncMock()
     callback.message.answer_photo = AsyncMock()
+    callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
     return callback
 
@@ -137,6 +138,88 @@ async def test_reminder_send_failure_is_logged_and_reminder_still_marked(monkeyp
 
     assert marked == [(7, "3d")]
     assert "Не удалось отправить напоминание" in caplog.text
+
+
+# --- Шаг email в визарде брони ---
+
+async def test_email_skip_sets_none_and_moves_to_comment_state():
+    state = FakeState()
+    callback = make_callback("email_skip")
+
+    await bot_module.handle_email_skip(callback, state)
+
+    data = await state.get_data()
+    assert data["client_email"] is None
+    assert state.state == bot_module.BookingStates.waiting_comment
+
+
+async def test_email_text_with_at_sign_is_saved_and_moves_to_comment_state():
+    state = FakeState()
+    message = make_message("client@example.com")
+
+    await bot_module.handle_email_text(message, state)
+
+    data = await state.get_data()
+    assert data["client_email"] == "client@example.com"
+    assert state.state == bot_module.BookingStates.waiting_comment
+
+
+async def test_email_text_without_at_sign_reprompts_and_stays_in_email_state():
+    state = FakeState()
+    message = make_message("не email")
+
+    await bot_module.handle_email_text(message, state)
+
+    data = await state.get_data()
+    assert "client_email" not in data
+    assert state.state is None
+    message.answer.assert_awaited_once_with("Похоже, это не email. Попробуй ещё раз или нажми «Пропустить» выше.")
+
+
+# --- Подтверждение брони: чек-лист админу + письмо клиенту ---
+
+async def test_confirmed_status_sends_admin_checklist_and_email_when_client_email_present(monkeypatch):
+    admin_id = 999
+    monkeypatch.setattr(bot_module, "ADMIN_IDS", {admin_id})
+    booking = {
+        "id": 42, "user_id": 555, "tour_id": "tour_1", "tour_title": "Морская прогулка",
+        "tour_date": "10.10.2026", "people_count": 2, "client_email": "client@example.com",
+    }
+    monkeypatch.setattr(bot_module.db, "update_status", MagicMock())
+    monkeypatch.setattr(bot_module.db, "get_booking", MagicMock(return_value=booking))
+    monkeypatch.setattr(bot_module.bot, "send_message", AsyncMock())
+    send_email_mock = MagicMock(return_value=False)
+    monkeypatch.setattr(bot_module.mailer, "send_email", send_email_mock)
+
+    callback = make_callback(f"status_confirmed_{booking['id']}", user_id=admin_id)
+
+    await bot_module.handle_status_change(callback)
+
+    callback.message.answer.assert_any_await(bot_module.BOOKING_CHECKLIST_FOR_ADMIN_TEXT)
+    send_email_mock.assert_called_once()
+    args, _ = send_email_mock.call_args
+    assert args[0] == "client@example.com"
+
+
+async def test_confirmed_status_warns_admin_when_client_email_missing(monkeypatch):
+    admin_id = 999
+    monkeypatch.setattr(bot_module, "ADMIN_IDS", {admin_id})
+    booking = {
+        "id": 43, "user_id": 556, "tour_id": "tour_1", "tour_title": "Морская прогулка",
+        "tour_date": "10.10.2026", "people_count": 2, "client_email": None,
+    }
+    monkeypatch.setattr(bot_module.db, "update_status", MagicMock())
+    monkeypatch.setattr(bot_module.db, "get_booking", MagicMock(return_value=booking))
+    monkeypatch.setattr(bot_module.bot, "send_message", AsyncMock())
+    send_email_mock = MagicMock()
+    monkeypatch.setattr(bot_module.mailer, "send_email", send_email_mock)
+
+    callback = make_callback(f"status_confirmed_{booking['id']}", user_id=admin_id)
+
+    await bot_module.handle_status_change(callback)
+
+    send_email_mock.assert_not_called()
+    callback.message.answer.assert_any_await("⚠️ Email клиента не указан — информационное письмо не отправлено.")
 
 
 # --- Черновики контента больше не конфликтуют с данными брони (draft_tour_id/draft_variant) ---

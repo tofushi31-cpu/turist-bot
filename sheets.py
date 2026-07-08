@@ -10,9 +10,9 @@ GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "google_credentia
 
 HEADERS = [
     "ID", "Тур", "Дата тура", "Человек", "Пожелания", "Сегмент", "Источник",
-    "Запасной контакт", "Клиент", "ID клиента", "Комментарий", "Статус", "Создано",
+    "Запасной контакт", "Email", "Клиент", "ID клиента", "Комментарий", "Статус", "Создано",
 ]
-STATUS_COLUMN = 12
+STATUS_COLUMN = 13
 
 _worksheet = None
 
@@ -47,7 +47,8 @@ def append_booking(booking, wishes_text, segment_label, source_label, customer_n
         ws.append_row([
             booking["id"], booking["tour_title"], booking.get("tour_date") or "не указана",
             booking.get("people_count") or "не указано", wishes_text, segment_label, source_label,
-            booking.get("alt_contact") or "не указан", customer_name, booking["user_id"],
+            booking.get("alt_contact") or "не указан", booking.get("client_email") or "не указан",
+            customer_name, booking["user_id"],
             booking.get("comment") or "", status_label, booking.get("created_at") or "",
         ])
     except Exception:

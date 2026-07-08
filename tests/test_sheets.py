@@ -7,7 +7,8 @@ import sheets
 def make_booking(**overrides):
     booking = {
         "id": 42, "user_id": 555, "tour_title": "Остров Клеопатры", "tour_date": "10.10.2026",
-        "people_count": 2, "alt_contact": None, "comment": "без комментария", "created_at": "2026-07-07 10:00:00",
+        "people_count": 2, "alt_contact": None, "client_email": None,
+        "comment": "без комментария", "created_at": "2026-07-07 10:00:00",
     }
     booking.update(overrides)
     return booking
@@ -21,7 +22,7 @@ def test_append_booking_writes_expected_row(monkeypatch):
 
     ws.append_row.assert_called_once_with([
         42, "Остров Клеопатры", "10.10.2026", 2, "не указаны", "Турист", "Инстаграм",
-        "не указан", "@ivan", 555, "без комментария", "🆕 новая", "2026-07-07 10:00:00",
+        "не указан", "не указан", "@ivan", 555, "без комментария", "🆕 новая", "2026-07-07 10:00:00",
     ])
 
 

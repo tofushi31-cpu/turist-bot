@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 
 import db
+import mailer
 import payments
 import sheets
 
@@ -58,6 +59,7 @@ class BookingStates(StatesGroup):
     waiting_segment = State()
     waiting_source = State()
     waiting_contact = State()
+    waiting_email = State()
     waiting_comment = State()
 
 
@@ -114,6 +116,10 @@ def build_choice_menu(options: list, prefix: str) -> InlineKeyboardMarkup:
 
 contact_skip_menu = InlineKeyboardMarkup(
     inline_keyboard=[[InlineKeyboardButton(text="Пропустить (только Telegram)", callback_data="contact_skip")]]
+)
+
+email_skip_menu = InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="Пропустить (без e-mail)", callback_data="email_skip")]]
 )
 
 
@@ -475,6 +481,44 @@ VISA_INFO = {
         ],
     },
 }
+
+INSURANCE_CHECKLIST_TEXT = (
+    "🛡 Памятка по страховке для поездки:\n\n"
+    "• Проверьте, что полис покрывает водные активности (катер, снорклинг, купание в открытой воде) — "
+    "многие базовые полисы это исключают отдельным пунктом\n"
+    "• Убедитесь, что есть покрытие экстренной медицинской эвакуации и репатриации\n"
+    "• Обратите внимание на исключение при алкогольном опьянении — на вечерних турах с алкоголем это частая причина отказа в выплате\n"
+    "• Сверьте даты полиса с датами поездки, а лимит покрытия — с реальной стоимостью лечения за рубежом\n"
+    "• Уточните франшизу (сумму, которую вы оплачиваете сами до начала выплат)\n\n"
+    "⚠️ Это общие ориентиры, не конкретная рекомендация — выбор конкретной страховой компании и полиса за вами."
+)
+
+BOOKING_CHECKLIST_FOR_ADMIN_TEXT = (
+    "📋 Стоит уточнить у клиента перед туром:\n\n"
+    "• Аллергии/ограничения в еде (на борту обед)\n"
+    "• Умеет ли плавать / нет ли страха воды\n"
+    "• Особый повод (день рождения, годовщина, медовый месяц)\n"
+    "• Едут ли дети в группе — возраст, нужен ли детский спасательный жилет"
+)
+
+
+def build_visa_exempt_text() -> str:
+    return next(
+        text for oid, label, highlight, text in VISA_INFO["thailand"]["options"] if oid == "exempt"
+    )
+
+
+def build_confirmation_email_body(booking: dict) -> str:
+    return (
+        "Здравствуйте!\n\n"
+        f"Ваша бронь на «{booking['tour_title']}» подтверждена. "
+        f"Дата: {booking.get('tour_date') or 'уточняется'}.\n\n"
+        "Если вы впервые в Таиланде или ещё не оформляли визу — вот актуальная информация о безвизовом въезде:\n\n"
+        f"{build_visa_exempt_text()}\n\n"
+        f"{INSURANCE_CHECKLIST_TEXT}\n\n"
+        "До встречи на туре!"
+    )
+
 
 tours_menu = InlineKeyboardMarkup(
     inline_keyboard=[
@@ -1067,15 +1111,41 @@ async def handle_source_text_hint(message: Message):
 @dp.callback_query(BookingStates.waiting_contact, F.data == "contact_skip")
 async def handle_contact_skip(callback: CallbackQuery, state: FSMContext):
     await state.update_data(alt_contact=None)
-    await state.set_state(BookingStates.waiting_comment)
+    await state.set_state(BookingStates.waiting_email)
     await callback.message.edit_text("Запасной контакт: пропущено")
-    await callback.message.answer("Что-то ещё хотите добавить? Если нет — просто отправьте \"+\".")
+    await callback.message.answer(
+        "Укажи email — пришлём туда документы для визы и памятку по страховке после подтверждения брони:",
+        reply_markup=email_skip_menu,
+    )
     await callback.answer()
 
 
 @dp.message(BookingStates.waiting_contact)
 async def handle_contact_text(message: Message, state: FSMContext):
     await state.update_data(alt_contact=message.text)
+    await state.set_state(BookingStates.waiting_email)
+    await message.answer(
+        "Укажи email — пришлём туда документы для визы и памятку по страховке после подтверждения брони:",
+        reply_markup=email_skip_menu,
+    )
+
+
+@dp.callback_query(BookingStates.waiting_email, F.data == "email_skip")
+async def handle_email_skip(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(client_email=None)
+    await state.set_state(BookingStates.waiting_comment)
+    await callback.message.edit_text("Email: пропущено")
+    await callback.message.answer("Что-то ещё хотите добавить? Если нет — просто отправьте \"+\".")
+    await callback.answer()
+
+
+@dp.message(BookingStates.waiting_email)
+async def handle_email_text(message: Message, state: FSMContext):
+    email = (message.text or "").strip()
+    if "@" not in email:
+        await message.answer("Похоже, это не email. Попробуй ещё раз или нажми «Пропустить» выше.")
+        return
+    await state.update_data(client_email=email)
     await state.set_state(BookingStates.waiting_comment)
     await message.answer("Что-то ещё хотите добавить? Если нет — просто отправьте \"+\".")
 
@@ -1100,6 +1170,7 @@ async def handle_booking_comment(message: Message, state: FSMContext):
     source = data.get("source")
     source_label = SOURCE_LABELS.get(source, "не указано")
     alt_contact = data.get("alt_contact")
+    client_email = data.get("client_email")
 
     await state.clear()
 
@@ -1111,6 +1182,7 @@ async def handle_booking_comment(message: Message, state: FSMContext):
         customer.id, customer.username, tour_id, tour_title, tour_date, comment,
         people_count=people_count, wishes=",".join(wish_ids), segment=segment,
         source=source, alt_contact=alt_contact, custom_wish=data.get("custom_wish"),
+        client_email=client_email,
     )
 
     try:
@@ -1130,7 +1202,8 @@ async def handle_booking_comment(message: Message, state: FSMContext):
         f"Пожелания: {wishes_text}\n"
         f"Сегмент: {segment_label}\n"
         f"Откуда узнали: {source_label}\n"
-        f"Запасной контакт: {alt_contact or 'не указан'}\n\n"
+        f"Запасной контакт: {alt_contact or 'не указан'}\n"
+        f"Email: {client_email or 'не указан'}\n\n"
         f"Клиент: {customer_name}\nID клиента: {customer.id}\nКомментарий: {comment}"
     )
     for admin_id in ADMIN_IDS:
@@ -1181,6 +1254,21 @@ async def handle_status_change(callback: CallbackQuery):
                     )
             except Exception:
                 logger.exception("Не удалось создать ссылку на оплату для заявки #%s", booking_id)
+
+            await callback.message.answer(BOOKING_CHECKLIST_FOR_ADMIN_TEXT)
+
+            client_email = booking.get("client_email")
+            if client_email:
+                try:
+                    mailer.send_email(
+                        client_email,
+                        f"Подтверждение брони «{booking['tour_title']}»",
+                        build_confirmation_email_body(booking),
+                    )
+                except Exception:
+                    logger.exception("Не удалось отправить письмо клиенту по заявке #%s", booking_id)
+            else:
+                await callback.message.answer("⚠️ Email клиента не указан — информационное письмо не отправлено.")
 
         await bot.send_message(booking["user_id"], client_text, reply_markup=pay_markup)
 
