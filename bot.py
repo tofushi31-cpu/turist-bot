@@ -132,6 +132,7 @@ class AdminContentStates(StatesGroup):
     waiting_rental_price = State()
     waiting_content_photo = State()
     waiting_realestate_price = State()
+    waiting_usd_rate = State()
 
 
 PHOTO_FORMATS = {
@@ -239,6 +240,7 @@ def build_main_menu(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🛵 Аренда мопеда", callback_data="menu_rental"),
             InlineKeyboardButton(text="🏠 Недвижимость", callback_data="menu_realestate"),
         ])
+        rows.append([InlineKeyboardButton(text="💱 Валюта цен", callback_data="menu_currency")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 tours = {
@@ -281,6 +283,17 @@ tours = {
 
 def get_tour_photos(tour_id: str) -> list[str]:
     return tours[tour_id]["photos"] + db.list_tour_photos(tour_id)
+
+
+def get_display_price(tour: dict) -> str:
+    currency = db.get_setting("currency", "RUB")
+    if currency != "USD":
+        return tour["price"]
+
+    match = re.search(r"(\d+)", tour["price"])
+    base_rub = int(match.group(1)) if match else 0
+    rate = float(db.get_setting("usd_rate") or 90)
+    return f"от {round(base_rub / rate)}$"
 
 
 VISA_DISCLAIMER = "\n\n⚠️ Правила могут измениться — уточняйте перед поездкой на официальном сайте посольства."
@@ -656,7 +669,7 @@ def generate_caption(tour: dict, variant: int) -> str:
     return template.format(
         title=tour["title"],
         description=tour["description"],
-        price=tour["price"],
+        price=get_display_price(tour),
         highlights=highlights,
     )
 
@@ -749,7 +762,7 @@ def build_content_card(tour: dict, out_path: Path) -> Path:
     highlight_text = f"• {tour['highlights'][0]}"
     highlight_lines = wrap_text(draw, highlight_text, highlight_font, w - padding * 2)[:2]
 
-    price_text = tour["price"].replace("₽", " руб.")
+    price_text = get_display_price(tour).replace("₽", " руб.")
     badge_pad_x, badge_pad_y = 26, 16
     price_w = draw.textlength(price_text, font=price_font)
     badge_h = 36 + badge_pad_y * 2
@@ -1215,6 +1228,72 @@ async def handle_realestate_post(callback: CallbackQuery):
     await callback.answer()
 
 
+currency_menu = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="🇷🇺 Рубли", callback_data="currency_set_RUB")],
+        [InlineKeyboardButton(text="💵 Доллары", callback_data="currency_set_USD")],
+        [InlineKeyboardButton(text="✏️ Изменить курс USD", callback_data="currency_edit_rate")],
+    ]
+)
+
+
+@dp.callback_query(F.data == "menu_currency")
+async def handle_menu_currency(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    currency = db.get_setting("currency", "RUB")
+    rate = db.get_setting("usd_rate")
+    currency_label = "доллары" if currency == "USD" else "рубли"
+    rate_line = f"\nКурс: {rate} ₽ за $1" if rate else ""
+    await callback.message.answer(f"Валюта показа цен: {currency_label}{rate_line}", reply_markup=currency_menu)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("currency_set_"))
+async def handle_currency_set(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    currency = callback.data.removeprefix("currency_set_")
+    if currency == "USD" and not db.get_setting("usd_rate"):
+        await state.set_state(AdminContentStates.waiting_usd_rate)
+        await callback.message.answer("Сначала укажи курс: сколько рублей за 1 доллар (например 90):")
+        await callback.answer()
+        return
+    db.set_setting("currency", currency)
+    label = "доллары" if currency == "USD" else "рубли"
+    await callback.message.answer(f"Валюта показа цен: {label} ✅")
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "currency_edit_rate")
+async def handle_currency_edit_rate(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await state.set_state(AdminContentStates.waiting_usd_rate)
+    await callback.message.answer("Введи курс: сколько рублей за 1 доллар (например 90):")
+    await callback.answer()
+
+
+@dp.message(AdminContentStates.waiting_usd_rate)
+async def handle_usd_rate_text(message: Message, state: FSMContext):
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        rate = float(text)
+        if rate <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Нужно положительное число, например 90 или 90.5. Попробуй ещё раз.")
+        return
+
+    db.set_setting("usd_rate", str(rate))
+    db.set_setting("currency", "USD")
+    await state.clear()
+    await message.answer(f"Курс сохранён: {rate} ₽ за $1. Валюта показа цен: доллары ✅")
+
+
 @dp.callback_query(F.data == "tours")
 async def handle_tours(callback: CallbackQuery):
     await callback.message.answer("Выбери тур:", reply_markup=tours_menu)
@@ -1227,7 +1306,7 @@ async def handle_tour_details(callback: CallbackQuery):
     booking_button = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="✅ Забронировать", callback_data=f"book_{callback.data}")]]
     )
-    text = f"{tour['title']}\n\n{tour['description']}\n\nЦена: {tour['price']}"
+    text = f"{tour['title']}\n\n{tour['description']}\n\nЦена: {get_display_price(tour)}"
     photo = FSInputFile(IMAGES_DIR / tour["photos"][0])
     await callback.message.answer_photo(photo, caption=text, reply_markup=booking_button)
     await callback.answer()

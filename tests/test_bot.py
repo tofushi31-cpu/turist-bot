@@ -293,6 +293,66 @@ async def test_realestate_price_text_is_saved_and_state_cleared(monkeypatch):
     )
 
 
+# --- Валюта показа цен туров ---
+
+def test_get_display_price_returns_original_when_currency_is_rub(monkeypatch):
+    monkeypatch.setattr(bot_module.db, "get_setting", lambda key, default=None: default)
+    tour = bot_module.tours["tour_1"]
+    assert bot_module.get_display_price(tour) == tour["price"]
+
+
+def test_get_display_price_converts_to_usd_using_rate(monkeypatch):
+    def fake_get_setting(key, default=None):
+        return {"currency": "USD", "usd_rate": "90"}.get(key, default)
+
+    monkeypatch.setattr(bot_module.db, "get_setting", fake_get_setting)
+    tour = bot_module.tours["tour_1"]  # price "от 1500₽" -> 1500 / 90 = 16.67 -> 17
+    assert bot_module.get_display_price(tour) == "от 17$"
+
+
+async def test_currency_set_usd_without_rate_prompts_for_rate_first(monkeypatch):
+    monkeypatch.setattr(bot_module.db, "get_setting", lambda key, default=None: default)
+    set_setting_mock = MagicMock()
+    monkeypatch.setattr(bot_module.db, "set_setting", set_setting_mock)
+    admin_id = next(iter(bot_module.ADMIN_IDS)) if bot_module.ADMIN_IDS else 999
+    monkeypatch.setattr(bot_module, "ADMIN_IDS", {admin_id})
+
+    state = FakeState()
+    callback = make_callback("currency_set_USD", user_id=admin_id)
+
+    await bot_module.handle_currency_set(callback, state)
+
+    set_setting_mock.assert_not_called()
+    assert state.state == bot_module.AdminContentStates.waiting_usd_rate
+
+
+async def test_usd_rate_text_saves_rate_and_switches_currency(monkeypatch):
+    set_setting_mock = MagicMock()
+    monkeypatch.setattr(bot_module.db, "set_setting", set_setting_mock)
+    state = FakeState()
+    state.state = bot_module.AdminContentStates.waiting_usd_rate
+    message = make_message("90")
+
+    await bot_module.handle_usd_rate_text(message, state)
+
+    set_setting_mock.assert_any_call("usd_rate", "90.0")
+    set_setting_mock.assert_any_call("currency", "USD")
+    assert state.state is None
+
+
+async def test_usd_rate_text_invalid_input_reprompts_without_saving(monkeypatch):
+    set_setting_mock = MagicMock()
+    monkeypatch.setattr(bot_module.db, "set_setting", set_setting_mock)
+    state = FakeState()
+    state.state = bot_module.AdminContentStates.waiting_usd_rate
+    message = make_message("не число")
+
+    await bot_module.handle_usd_rate_text(message, state)
+
+    set_setting_mock.assert_not_called()
+    assert state.state == bot_module.AdminContentStates.waiting_usd_rate
+
+
 # --- Загрузка фото в галерею тура ---
 
 def test_get_tour_photos_combines_hardcoded_and_uploaded(monkeypatch):
