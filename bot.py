@@ -3,6 +3,7 @@ import calendar
 import logging
 import os
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -1061,9 +1062,13 @@ async def handle_photo_upload(message: Message, state: FSMContext):
 
     try:
         await bot.download_file(tg_file.file_path, destination=src_path)
-        with Image.open(src_path) as img:
-            result = fit_and_crop(img.convert("RGB"), target_w, target_h)
-            result.save(out_path, "JPEG", quality=92)
+
+        def _process_photo():
+            with Image.open(src_path) as img:
+                result = fit_and_crop(img.convert("RGB"), target_w, target_h)
+                result.save(out_path, "JPEG", quality=92)
+
+        await asyncio.to_thread(_process_photo)
 
         await message.answer_photo(
             FSInputFile(out_path),
@@ -1131,9 +1136,11 @@ async def handle_rental_post(callback: CallbackQuery):
         await callback.answer()
         return
 
-    card_path = TMP_DIR / f"rental_{callback.from_user.id}.jpg"
+    card_path = TMP_DIR / f"rental_{uuid.uuid4().hex}.jpg"
     try:
-        build_info_card("🛵 Аренда мопеда/мотоцикла", price_text, "Ориентир по цене", card_path)
+        await asyncio.to_thread(
+            build_info_card, "🛵 Аренда мопеда/мотоцикла", price_text, "Ориентир по цене", card_path
+        )
         await callback.message.answer_photo(
             FSInputFile(card_path), caption=build_rental_post_caption(price_text)
         )
@@ -1195,9 +1202,11 @@ async def handle_realestate_post(callback: CallbackQuery):
         await callback.answer()
         return
 
-    card_path = TMP_DIR / f"realestate_{callback.from_user.id}.jpg"
+    card_path = TMP_DIR / f"realestate_{uuid.uuid4().hex}.jpg"
     try:
-        build_info_card("🏠 Недвижимость в Таиланде", price_text, "Ориентир по цене", card_path)
+        await asyncio.to_thread(
+            build_info_card, "🏠 Недвижимость в Таиланде", price_text, "Ориентир по цене", card_path
+        )
         await callback.message.answer_photo(
             FSInputFile(card_path), caption=build_realestate_post_caption(price_text)
         )
@@ -1251,9 +1260,8 @@ async def handle_visa_option(callback: CallbackQuery):
     opt_label, highlight, text = next(
         (label, highlight, text) for oid, label, highlight, text in info["options"] if oid == opt_id
     )
-    card_path = build_visa_card(
-        country, info["label"], opt_label, highlight, TMP_DIR / f"visa_{country}_{opt_id}_{callback.from_user.id}.jpg"
-    )
+    card_path = TMP_DIR / f"visa_{country}_{opt_id}_{uuid.uuid4().hex}.jpg"
+    await asyncio.to_thread(build_visa_card, country, info["label"], opt_label, highlight, card_path)
     try:
         await callback.message.answer_photo(FSInputFile(card_path))
     finally:
@@ -1302,6 +1310,12 @@ async def handle_cal_day(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(BookingStates.waiting_date)
 async def handle_booking_date(message: Message, state: FSMContext):
+    if parse_tour_date(message.text) == datetime.max:
+        await message.answer(
+            "Не получилось распознать дату. Введите в формате ДД.ММ или ДД.ММ.ГГГГ, "
+            "либо выберите день в календаре выше."
+        )
+        return
     await state.update_data(tour_date=message.text)
     await state.set_state(BookingStates.waiting_people)
     await message.answer("Сколько человек?", reply_markup=build_people_menu())
@@ -1364,7 +1378,7 @@ async def handle_wishes_text_hint(message: Message):
 @dp.callback_query(BookingStates.waiting_wishes, F.data == "wish_done")
 async def handle_wishes_done(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingStates.waiting_segment)
-    await callback.message.answer("Вы турист или уже переехали жить в Турцию?", reply_markup=build_choice_menu(SEGMENT_OPTIONS, "segment"))
+    await callback.message.answer("Вы турист или уже переехали жить в Таиланде?", reply_markup=build_choice_menu(SEGMENT_OPTIONS, "segment"))
     await callback.answer()
 
 
@@ -1480,7 +1494,8 @@ async def handle_booking_comment(message: Message, state: FSMContext):
 
     try:
         booking_row = db.get_booking(booking_id)
-        sheets.append_booking(
+        await asyncio.to_thread(
+            sheets.append_booking,
             booking_row, wishes_text, segment_label, source_label, customer_name,
             STATUS_LABELS["new"],
         )
@@ -1518,7 +1533,7 @@ async def handle_status_change(callback: CallbackQuery):
     booking = db.get_booking(booking_id)
 
     try:
-        sheets.update_status(booking_id, STATUS_LABELS[status])
+        await asyncio.to_thread(sheets.update_status, booking_id, STATUS_LABELS[status])
     except Exception:
         logger.exception("Не удалось обновить статус заявки #%s в Google Таблице", booking_id)
 
@@ -1538,7 +1553,8 @@ async def handle_status_change(callback: CallbackQuery):
         if status == "confirmed":
             try:
                 amount = extract_amount(booking["tour_id"], booking.get("people_count"))
-                payment_url = payments.create_payment_link(
+                payment_url = await asyncio.to_thread(
+                    payments.create_payment_link,
                     booking_id, amount, f"Оплата тура «{booking['tour_title']}» (заявка #{booking_id})",
                 )
                 if payment_url:
@@ -1553,7 +1569,8 @@ async def handle_status_change(callback: CallbackQuery):
             client_email = booking.get("client_email")
             if client_email:
                 try:
-                    mailer.send_email(
+                    await asyncio.to_thread(
+                        mailer.send_email,
                         client_email,
                         f"Подтверждение брони «{booking['tour_title']}»",
                         build_confirmation_email_body(booking),
@@ -1690,7 +1707,8 @@ async def handle_draft_start(callback: CallbackQuery, state: FSMContext):
     await state.update_data(draft_tour_id=tour_id, draft_variant=0)
     tour = tours[tour_id]
     caption = generate_caption(tour, variant=0)
-    card_path = build_content_card(tour, TMP_DIR / f"card_{tour_id}_{callback.from_user.id}.jpg")
+    card_path = TMP_DIR / f"card_{tour_id}_{uuid.uuid4().hex}.jpg"
+    await asyncio.to_thread(build_content_card, tour, card_path)
     try:
         await callback.message.answer_photo(FSInputFile(card_path), caption=caption, reply_markup=draft_review_menu)
     finally:
@@ -1712,7 +1730,8 @@ async def handle_draft_regen(callback: CallbackQuery, state: FSMContext):
     await state.update_data(draft_variant=variant)
     tour = tours[tour_id]
     caption = generate_caption(tour, variant=variant)
-    card_path = build_content_card(tour, TMP_DIR / f"card_{tour_id}_{callback.from_user.id}.jpg")
+    card_path = TMP_DIR / f"card_{tour_id}_{uuid.uuid4().hex}.jpg"
+    await asyncio.to_thread(build_content_card, tour, card_path)
     try:
         await callback.message.answer_photo(FSInputFile(card_path), caption=caption, reply_markup=draft_review_menu)
     finally:
