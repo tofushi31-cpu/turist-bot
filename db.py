@@ -86,7 +86,7 @@ def list_tour_photos(tour_id: str) -> list[str]:
 def list_tour_photos_with_ids(tour_id: str) -> list[tuple[int, str]]:
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute(
-            "SELECT id, filename FROM tour_photos WHERE tour_id = ? ORDER BY id", (tour_id,)
+            "SELECT id, filename FROM tour_photos WHERE tour_id = ? ORDER BY id DESC", (tour_id,)
         ).fetchall()
         return [(row[0], row[1]) for row in rows]
 
