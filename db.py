@@ -83,6 +83,23 @@ def list_tour_photos(tour_id: str) -> list[str]:
         return [row[0] for row in rows]
 
 
+def list_tour_photos_with_ids(tour_id: str) -> list[tuple[int, str]]:
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT id, filename FROM tour_photos WHERE tour_id = ? ORDER BY id", (tour_id,)
+        ).fetchall()
+        return [(row[0], row[1]) for row in rows]
+
+
+def delete_tour_photo(photo_id: int) -> str | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT filename FROM tour_photos WHERE id = ?", (photo_id,)).fetchone()
+        if row is None:
+            return None
+        conn.execute("DELETE FROM tour_photos WHERE id = ?", (photo_id,))
+        return row[0]
+
+
 def get_setting(key: str, default: str | None = None) -> str | None:
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()

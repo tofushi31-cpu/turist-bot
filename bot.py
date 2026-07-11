@@ -616,12 +616,20 @@ content_menu = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="📝 Пост для Instagram", callback_data="content_draft")],
         [InlineKeyboardButton(text="📤 Загрузить фото тура", callback_data="content_upload")],
+        [InlineKeyboardButton(text="🗂 Загруженные фото", callback_data="content_gallery")],
     ]
 )
 
 upload_tours_menu = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text=tour["title"], callback_data=f"uploadphoto_{tour_id}")]
+        for tour_id, tour in tours.items()
+    ]
+)
+
+gallery_tours_menu = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text=tour["title"], callback_data=f"gallery_{tour_id}")]
         for tour_id, tour in tours.items()
     ]
 )
@@ -990,6 +998,58 @@ async def handle_tour_photo_upload(message: Message, state: FSMContext):
 @dp.message(AdminContentStates.waiting_content_photo)
 async def handle_tour_photo_upload_wrong_type(message: Message):
     await message.answer("Пришли именно фото (не файл и не текст).")
+
+
+@dp.callback_query(F.data == "content_gallery")
+async def handle_content_gallery(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    await callback.message.answer("Загруженные фото какого тура показать?", reply_markup=gallery_tours_menu)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("gallery_"))
+async def handle_gallery_show(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    tour_id = callback.data.removeprefix("gallery_")
+    photos = db.list_tour_photos_with_ids(tour_id)
+    if not photos:
+        await callback.message.answer(
+            f"У «{tours[tour_id]['title']}» пока нет загруженных фото — только встроенные."
+        )
+        await callback.answer()
+        return
+    await callback.message.answer(
+        f"Загруженные фото «{tours[tour_id]['title']}» ({len(photos)} шт). Встроенные фото тура не показываются и не удаляются."
+    )
+    for photo_id, filename in photos:
+        path = IMAGES_DIR / filename
+        if not path.exists():
+            db.delete_tour_photo(photo_id)
+            continue
+        delete_button = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delphoto_{photo_id}")]]
+        )
+        await callback.message.answer_photo(FSInputFile(path), reply_markup=delete_button)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("delphoto_"))
+async def handle_gallery_delete(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    photo_id = int(callback.data.removeprefix("delphoto_"))
+    filename = db.delete_tour_photo(photo_id)
+    if filename is None:
+        await callback.answer("Это фото уже удалено", show_alert=True)
+        return
+    (IMAGES_DIR / filename).unlink(missing_ok=True)
+    await callback.message.edit_caption(caption="🗑 Фото удалено из галереи")
+    await callback.answer("Удалено ✅")
 
 
 @dp.callback_query(F.data == "menu_bookings")
