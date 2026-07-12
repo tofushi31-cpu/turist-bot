@@ -3,6 +3,17 @@
 set -e
 SRC="/Users/baga/Projects/turist-bot/bookings.db"
 DST_DIR="$HOME/Backups/turist-bot"
+
+valli_alert() {
+  # токен и chat_id лежат в .env (не в git); алерт только при сбое
+  local env_file="/Users/baga/Projects/turist-bot/.env"
+  local token=$(grep '^VALLI_BOT_TOKEN=' "$env_file" | cut -d= -f2-)
+  local chat=$(grep '^VALLI_CHAT_ID=' "$env_file" | cut -d= -f2-)
+  [ -n "$token" ] && [ -n "$chat" ] && curl -s -m 10 -X POST \
+    "https://api.telegram.org/bot$token/sendMessage" \
+    -d chat_id="$chat" --data-urlencode "text=$1" > /dev/null 2>&1
+}
+trap 'valli_alert "❌ Валли: ежедневный бэкап базы turist-bot НЕ выполнен — проверь backup.log на Маке."' ERR
 mkdir -p "$DST_DIR"
 STAMP=$(date +%Y-%m-%d_%H%M)
 /usr/bin/sqlite3 "$SRC" ".backup '$DST_DIR/bookings_$STAMP.db'"
