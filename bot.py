@@ -296,6 +296,35 @@ def get_display_price(tour: dict) -> str:
     return f"от {round(base_rub / rate)}$"
 
 
+CBR_RATES_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
+
+
+async def refresh_usd_rate() -> float | None:
+    """Тянет курс USD с официального сайта ЦБ РФ и сохраняет в настройки. None — если не получилось."""
+    import aiohttp
+    import xml.etree.ElementTree as ET
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(CBR_RATES_URL, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                raw = await resp.read()
+        root = ET.fromstring(raw.decode("windows-1251"))
+        value = next(v.findtext("Value") for v in root.iter("Valute") if v.findtext("CharCode") == "USD")
+        rate = round(float(value.replace(",", ".")), 2)
+    except Exception:
+        logger.exception("Не удалось получить курс ЦБ")
+        return None
+    db.set_setting("usd_rate", str(rate))
+    db.set_setting("usd_rate_updated", datetime.now().strftime("%Y-%m-%d"))
+    return rate
+
+
+async def ensure_fresh_usd_rate() -> None:
+    """Обновляет курс, если сегодня ещё не обновлялся. Ошибки сети не мешают работе."""
+    if db.get_setting("usd_rate_updated") != datetime.now().strftime("%Y-%m-%d"):
+        await refresh_usd_rate()
+
+
 VISA_DISCLAIMER = "\n\n⚠️ Правила могут измениться — уточняйте перед поездкой на официальном сайте посольства."
 
 VISA_INFO = {
@@ -1174,7 +1203,7 @@ async def handle_menu_rental(callback: CallbackQuery, state: FSMContext):
     price_text = db.get_setting("rental_price_text")
     if not price_text:
         await state.set_state(AdminContentStates.waiting_rental_price)
-        await callback.message.answer("Цена ещё не задана. Введи текущий ориентир (например: 150-300 THB/день):")
+        await callback.message.answer("Цена ещё не задана. Введи текущий ориентир (например: 1000-2000 ₺/день):")
         await callback.answer()
         return
     await callback.message.answer(f"Текущая цена: {price_text}", reply_markup=rental_menu)
@@ -1187,7 +1216,7 @@ async def handle_rental_edit(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     await state.set_state(AdminContentStates.waiting_rental_price)
-    await callback.message.answer("Введи новый ориентир цены (например: 150-300 THB/день):")
+    await callback.message.answer("Введи новый ориентир цены (например: 1000-2000 ₺/день):")
     await callback.answer()
 
 
@@ -1239,7 +1268,7 @@ async def handle_menu_realestate(callback: CallbackQuery, state: FSMContext):
     if not price_text:
         await state.set_state(AdminContentStates.waiting_realestate_price)
         await callback.message.answer(
-            "Цена ещё не задана. Введи текущий ориентир (например: аренда 15-40к THB/мес, кондо от 2.5 млн THB):"
+            "Цена ещё не задана. Введи текущий ориентир (например: аренда 15-40к ₺/мес, квартира от 2.5 млн ₺):"
         )
         await callback.answer()
         return
@@ -1253,7 +1282,7 @@ async def handle_realestate_edit(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     await state.set_state(AdminContentStates.waiting_realestate_price)
-    await callback.message.answer("Введи новый ориентир цены (например: аренда 15-40к THB/мес, кондо от 2.5 млн THB):")
+    await callback.message.answer("Введи новый ориентир цены (например: аренда 15-40к ₺/мес, квартира от 2.5 млн ₺):")
     await callback.answer()
 
 
@@ -1292,7 +1321,8 @@ currency_menu = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="🇷🇺 Рубли", callback_data="currency_set_RUB")],
         [InlineKeyboardButton(text="💵 Доллары", callback_data="currency_set_USD")],
-        [InlineKeyboardButton(text="✏️ Изменить курс USD", callback_data="currency_edit_rate")],
+        [InlineKeyboardButton(text="🔄 Обновить курс из ЦБ", callback_data="currency_refresh_rate")],
+        [InlineKeyboardButton(text="✏️ Изменить курс вручную", callback_data="currency_edit_rate")],
     ]
 )
 
@@ -1302,11 +1332,26 @@ async def handle_menu_currency(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer()
         return
+    await ensure_fresh_usd_rate()
     currency = db.get_setting("currency", "RUB")
     rate = db.get_setting("usd_rate")
+    rate_date = db.get_setting("usd_rate_updated")
     currency_label = "доллары" if currency == "USD" else "рубли"
-    rate_line = f"\nКурс: {rate} ₽ за $1" if rate else ""
+    rate_line = f"\nКурс: {rate} ₽ за $1 (ЦБ, {rate_date})" if rate and rate_date else (f"\nКурс: {rate} ₽ за $1" if rate else "")
     await callback.message.answer(f"Валюта показа цен: {currency_label}{rate_line}", reply_markup=currency_menu)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "currency_refresh_rate")
+async def handle_currency_refresh_rate(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer()
+        return
+    rate = await refresh_usd_rate()
+    if rate is None:
+        await callback.message.answer("Не удалось получить курс ЦБ — проверь интернет или введи вручную.")
+    else:
+        await callback.message.answer(f"Курс обновлён: {rate} ₽ за $1 (ЦБ РФ) ✅")
     await callback.answer()
 
 
