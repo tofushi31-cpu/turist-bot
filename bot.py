@@ -1517,7 +1517,7 @@ async def handle_wishes_text_hint(message: Message):
 @dp.callback_query(BookingStates.waiting_wishes, F.data == "wish_done")
 async def handle_wishes_done(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingStates.waiting_segment)
-    await callback.message.answer("Вы турист или уже переехали жить в Таиланде?", reply_markup=build_choice_menu(SEGMENT_OPTIONS, "segment"))
+    await callback.message.answer("Вы турист или уже переехали жить в Турцию?", reply_markup=build_choice_menu(SEGMENT_OPTIONS, "segment"))
     await callback.answer()
 
 
