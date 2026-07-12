@@ -1419,7 +1419,9 @@ async def handle_tour_details(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "visa_docs")
 async def handle_visa_docs(callback: CallbackQuery):
-    options = [(country_id, info["label"]) for country_id, info in VISA_INFO.items()]
+    # Турция первой — основная страна туров
+    visa_order = ("turkey", "thailand", "vietnam")
+    options = [(country_id, VISA_INFO[country_id]["label"]) for country_id in visa_order]
     await callback.message.answer(
         "Для какой страны нужны документы на визу?", reply_markup=build_choice_menu(options, "visacountry")
     )
