@@ -33,3 +33,32 @@ elif [ ${#PIDS[@]} -gt 1 ]; then
   start_bot
   valli_alert "⚠️ Валли: у turist-bot было ${#PIDS[@]} процессов-дублей — почистил и перезапустил ($(date '+%H:%M'))."
 fi
+
+# Проверка сетевых обрывов (бот жив, но не может достучаться до Telegram API)
+NET_STATE="/tmp/turistbot-netalert-state"
+NET_THRESHOLD=3
+NET_COOLDOWN=1800
+CUTOFF=$(date -v-6M +"%Y-%m-%d %H:%M:%S")
+NET_ERRORS=$(awk -v cutoff="$CUTOFF" '
+  /ERROR aiogram.dispatcher/ {
+    ts = $1 " " $2
+    gsub(/,.*/, "", ts)
+    if (ts >= cutoff) c++
+  }
+  END { print c+0 }
+' "$BOT_DIR/bot.log")
+
+if [ "$NET_ERRORS" -ge "$NET_THRESHOLD" ]; then
+  LAST_ALERT=0
+  [ -f "$NET_STATE" ] && LAST_ALERT=$(cat "$NET_STATE")
+  NOW=$(date +%s)
+  if [ $((NOW - LAST_ALERT)) -gt "$NET_COOLDOWN" ]; then
+    echo "$(date): нестабильная связь с Telegram API — $NET_ERRORS ошибок за 6 мин" >> "$LOG"
+    valli_alert "📡 Валли: turist-bot не может достучаться до Telegram API ($NET_ERRORS обрывов за 6 мин). Бот жив, сам переподключается."
+    echo "$NOW" > "$NET_STATE"
+  fi
+elif [ -f "$NET_STATE" ]; then
+  echo "$(date): связь с Telegram API восстановилась" >> "$LOG"
+  valli_alert "✅ Валли: связь turist-bot с Telegram API восстановилась."
+  rm -f "$NET_STATE"
+fi
