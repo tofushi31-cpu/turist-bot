@@ -21,6 +21,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InputMediaPhoto,
     KeyboardButton,
+    MenuButtonCommands,
     Message,
     ReplyKeyboardMarkup,
 )
@@ -133,6 +134,10 @@ class AdminContentStates(StatesGroup):
     waiting_content_photo = State()
     waiting_realestate_price = State()
     waiting_usd_rate = State()
+
+
+class ContactStates(StatesGroup):
+    waiting_message = State()
 
 
 PHOTO_FORMATS = {
@@ -945,6 +950,30 @@ async def handle_start(message: Message):
 @dp.message(F.text == "/myid")
 async def handle_myid(message: Message):
     await message.answer(f"Твой Telegram ID: {message.from_user.id}")
+
+
+@dp.message(F.text == "/contact")
+async def handle_contact_command(message: Message, state: FSMContext):
+    await state.set_state(ContactStates.waiting_message)
+    await message.answer("Напишите ваш вопрос одним сообщением — мы ответим здесь же.")
+
+
+@dp.message(ContactStates.waiting_message)
+async def handle_contact_message(message: Message, state: FSMContext):
+    await state.clear()
+    customer = message.from_user
+    text = (
+        f"✉️ Сообщение от клиента\n\n"
+        f"От: {customer.full_name} (@{customer.username or '—'})\n"
+        f"ID клиента: {customer.id}\n\n"
+        f"{message.text}"
+    )
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:
+            logger.exception("Не удалось переслать сообщение от клиента %s админу %s", customer.id, admin_id)
+    await message.answer("Спасибо! Ваше сообщение передано, мы ответим вам здесь же.")
 
 
 @dp.message(F.text == "🏠 Главная")
@@ -1947,9 +1976,11 @@ async def handle_echo(message: Message):
 
 
 async def setup_commands():
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Начать"),
+            BotCommand(command="contact", description="Связаться с нами"),
             BotCommand(command="myid", description="Узнать свой Telegram ID"),
         ],
         scope=BotCommandScopeDefault(),
@@ -1958,6 +1989,7 @@ async def setup_commands():
         await bot.set_my_commands(
             [
                 BotCommand(command="start", description="Начать"),
+                BotCommand(command="contact", description="Связаться с нами"),
                 BotCommand(command="myid", description="Узнать свой Telegram ID"),
                 BotCommand(command="content", description="Создать пост для Instagram"),
                 BotCommand(command="bookings", description="Список заявок"),
