@@ -800,10 +800,13 @@ async def handle_myid(message: Message):
     await message.answer(f"Твой Telegram ID: {message.from_user.id}")
 
 
+CONTACT_PROMPT_TEXT = "Напишите ваш вопрос одним сообщением — мы ответим здесь же."
+
+
 @dp.message(F.text == "/contact")
 async def handle_contact_command(message: Message, state: FSMContext):
     await state.set_state(ContactStates.waiting_message)
-    await message.answer("Напишите ваш вопрос одним сообщением — мы ответим здесь же.")
+    await message.answer(CONTACT_PROMPT_TEXT)
 
 
 @dp.message(ContactStates.waiting_message)
@@ -1801,8 +1804,9 @@ async def handle_draft_approve(callback: CallbackQuery, state: FSMContext):
 
 
 @dp.callback_query(F.data == "contacts")
-async def handle_contacts(callback: CallbackQuery):
-    await callback.message.answer("Наши контакты: @example_manager")
+async def handle_contacts(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(ContactStates.waiting_message)
+    await callback.message.answer(CONTACT_PROMPT_TEXT)
     await callback.answer()
 
 
@@ -1859,7 +1863,8 @@ async def send_reminders_once():
             await bot.send_message(b["user_id"], text)
         except Exception:
             logger.exception("Не удалось отправить напоминание по брони #%s", b["id"])
-        db.mark_reminder_sent(b["id"], which)
+        else:
+            db.mark_reminder_sent(b["id"], which)
 
 
 async def reminder_loop():

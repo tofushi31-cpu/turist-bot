@@ -116,7 +116,7 @@ async def test_admin_notification_failure_is_logged_and_does_not_block_other_adm
     assert "Не удалось отправить заявку" in caplog.text
 
 
-async def test_reminder_send_failure_is_logged_and_reminder_still_marked(monkeypatch, caplog):
+async def test_reminder_send_failure_is_logged_and_not_marked(monkeypatch, caplog):
     booking = {
         "id": 7, "user_id": 555, "tour_title": "Панва Айленд", "tour_date": "10.10.2026",
         "status": "confirmed", "reminder_3d_sent": 0, "reminder_1d_sent": 0,
@@ -136,8 +136,30 @@ async def test_reminder_send_failure_is_logged_and_reminder_still_marked(monkeyp
     with caplog.at_level(logging.ERROR, logger="turist-bot"):
         await bot_module.send_reminders_once()
 
-    assert marked == [(7, "3d")]
+    assert marked == []
     assert "Не удалось отправить напоминание" in caplog.text
+
+
+async def test_reminder_send_success_is_marked(monkeypatch):
+    booking = {
+        "id": 7, "user_id": 555, "tour_title": "Панва Айленд", "tour_date": "10.10.2026",
+        "status": "confirmed", "reminder_3d_sent": 0, "reminder_1d_sent": 0,
+    }
+    monkeypatch.setattr(bot_module.db, "list_all_bookings", MagicMock(return_value=[booking]))
+    marked = []
+    monkeypatch.setattr(
+        bot_module.db, "mark_reminder_sent",
+        lambda booking_id, which: marked.append((booking_id, which)),
+    )
+    monkeypatch.setattr(
+        bot_module, "parse_tour_date",
+        lambda text: datetime.now() + timedelta(days=3),
+    )
+    monkeypatch.setattr(bot_module.bot, "send_message", AsyncMock())
+
+    await bot_module.send_reminders_once()
+
+    assert marked == [(7, "3d")]
 
 
 # --- Шаг email в визарде брони ---
